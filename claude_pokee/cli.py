@@ -146,7 +146,7 @@ def cmd_run(argv):
     env["ANTHROPIC_CUSTOM_MODEL_OPTION"] = PICKER_MODEL
     env["ANTHROPIC_CUSTOM_MODEL_OPTION_NAME"] = "Pokee Isaac"
     env["ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION"] = (
-        "Pokee Isaac via local router — text-only, ~128k context, no caching"
+        "Pokee Isaac via local router — text-only, 10M+ context, no caching"
     )
     # Deliberately no ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY: the saved
     # claude.ai login stays the active credential for Anthropic models.
