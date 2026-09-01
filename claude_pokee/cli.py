@@ -240,7 +240,8 @@ def _probe_once(target_tokens, config):
     sent = len(messages[0]["content"]) // CHARS_PER_TOKEN
 
     row = {"target": target_tokens, "sent": sent, "recalled": False,
-           "prompt_tokens": None, "error": None}
+           "prompt_tokens": None, "error": None,
+           "bytes": len(messages[0]["content"])}
     try:
         result = client.chat(messages, max_tokens=32, temperature=0, config=config)
     except IsaacError as exc:
@@ -256,8 +257,15 @@ def _probe_verdict(row):
     """Two independent signals: did the needle survive, and how much did the
     server say it actually read?"""
     if row["error"]:
-        # An explicit refusal is the honest failure mode — the limit is real
-        # but at least it is visible.
+        blob = row["error"].lower()
+        if "413" in blob or "too large" in blob or "request entity" in blob:
+            # A gateway size cap, hit before the model's context ever mattered.
+            # Reporting it as a context limit would understate the real window.
+            return False, "request too large to upload — a size cap, not the context limit"
+        if "timed out" in blob or "timeout" in blob:
+            return False, "timed out — inconclusive, not evidence of a limit"
+        # An explicit refusal is the honest failure mode: the limit is real,
+        # but at least it is visible rather than silent.
         return False, "rejected by the API"
 
     counted = row["prompt_tokens"]
@@ -300,8 +308,14 @@ def cmd_probe_context(argv):
 
     print("Probing {} with a needle-in-front prompt at {} sizes.".format(
         config["model"], len(sizes)))
-    print("This sends ~{:,} input tokens upstream in total, and Pokee bills "
-          "you for them.".format(sum(sizes)))
+    print("This sends ~{:,} input tokens upstream in total (~{:.1f} MB), and "
+          "Pokee bills you for them.".format(
+              sum(sizes), sum(sizes) * CHARS_PER_TOKEN / 1e6))
+    if max(sizes) > 1000000:
+        print("Note: the largest request is ~{:.1f} MB. Very large uploads can "
+              "trip a gateway size cap or a timeout before the context limit is "
+              "reached; the probe labels those separately rather than counting "
+              "them as the window.".format(max(sizes) * CHARS_PER_TOKEN / 1e6))
     if not assume_yes:
         try:
             answer = input("Continue? [y/N] ")

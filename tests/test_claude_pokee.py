@@ -531,6 +531,20 @@ class ProbeVerdictTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("truncated silently", note)
 
+    def test_an_upload_size_cap_is_not_called_a_context_limit(self):
+        ok, note = cli._probe_verdict({"error": "Pokee API error 413: request entity too large",
+                                       "recalled": False, "sent": 4000000,
+                                       "prompt_tokens": None})
+        self.assertFalse(ok)
+        self.assertIn("size cap, not the context limit", note)
+
+    def test_a_timeout_is_inconclusive(self):
+        ok, note = cli._probe_verdict({"error": "Could not reach ...: timed out",
+                                       "recalled": False, "sent": 1000000,
+                                       "prompt_tokens": None})
+        self.assertFalse(ok)
+        self.assertIn("inconclusive", note)
+
     def test_an_api_refusal_is_reported_as_such(self):
         ok, note = cli._probe_verdict({"error": "400 too long", "recalled": False,
                                        "sent": 100000, "prompt_tokens": None})
