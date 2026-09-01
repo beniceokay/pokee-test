@@ -1,0 +1,13 @@
+{
+  "name": "claude-pokee",
+  "owner": {
+    "name": "Marco van Hylckama Vlieg"
+  },
+  "plugins": [
+    {
+      "name": "claude-pokee",
+      "source": "./",
+      "description": "Pokee Isaac build tools for Claude Code — /claude-pokee:isaac command + isaac MCP server (ask, build, iterate, health)."
+    }
+  ]
+}

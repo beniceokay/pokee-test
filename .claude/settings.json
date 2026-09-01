@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "enableAllProjectMcpServers": true,
+  "env": {
+    "MCP_TIMEOUT": "30000",
+    "MCP_TOOL_TIMEOUT": "900000"
+  },
+  "permissions": {
+    "allow": [
+      "mcp__isaac__health",
+      "mcp__isaac__ask",
+      "mcp__isaac__build",
+      "mcp__isaac__iterate",
+      "Bash(python3 pokee_cli.py:*)"
+    ]
+  }
+}

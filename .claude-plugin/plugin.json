@@ -1,0 +1,21 @@
+{
+  "name": "claude-pokee",
+  "displayName": "Pokee Isaac",
+  "version": "0.1.0",
+  "description": "Pokee Isaac for Claude Code: /claude-pokee:isaac build command + isaac MCP tools (ask, build, iterate, health). Unofficial; requires a POKEE_API_KEY.",
+  "author": {
+    "name": "Marco van Hylckama Vlieg",
+    "email": "marcovhv@gmail.com"
+  },
+  "homepage": "https://github.com/TheMarco/claude-pokee",
+  "repository": "https://github.com/TheMarco/claude-pokee",
+  "license": "MIT",
+  "keywords": ["pokee", "isaac", "mcp", "codegen"],
+  "mcpServers": {
+    "isaac": {
+      "command": "python3",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/pokee_cli.py", "mcp"],
+      "timeout": 900000
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "isaac": {
+      "type": "stdio",
+      "command": "python3",
+      "args": [
+        "${CLAUDE_PROJECT_DIR:-.}/pokee_cli.py",
+        "mcp"
+      ],
+      "timeout": 900000
+    }
+  }
+}

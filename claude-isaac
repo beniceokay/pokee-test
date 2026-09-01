@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Checkout launcher: Claude Code running entirely on Pokee Isaac.
+# pip/pipx installs get the same via `claude-pokee isaac`.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec python3 "$ROOT/pokee_cli.py" isaac "$@"
