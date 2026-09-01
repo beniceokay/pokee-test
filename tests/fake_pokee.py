@@ -8,6 +8,9 @@ last user message so a single server can cover every branch:
   EMPTYSTREAM  stream with no content deltas (exercises the non-stream retry)
   CODE         reply with prose around a fenced html block
   BOOM         respond 402, to exercise HTTPError handling
+  REVOKED      403 key_revoked, in the documented error envelope
+  RATELIMIT    429 rate_limit_exceeded with a Retry-After header
+  TOOBIG       413 payload_too_large
   NEEDLE=      context-window probe: the server drops the oldest characters
                beyond `window_chars` (silently, like the real one) and can
                only echo the needle if it survived
@@ -109,6 +112,26 @@ class FakeHandler(BaseHTTPRequestHandler):
 
         if "BOOM" in prompt:
             self._json(402, {"error": {"message": "insufficient balance"}})
+            return
+
+        # The documented OpenAI-shaped envelope: error.code names the cause.
+        if "REVOKED" in prompt:
+            self._json(403, {"error": {"message": "The API key has been revoked",
+                                       "type": "invalid_request_error",
+                                       "code": "key_revoked"}})
+            return
+
+        if "RATELIMIT" in prompt:
+            self._json(429, {"error": {"message": "token limit reached",
+                                       "type": "rate_limit_error",
+                                       "code": "rate_limit_exceeded"}},
+                       extra_headers=[("Retry-After", "17")])
+            return
+
+        if "TOOBIG" in prompt:
+            self._json(413, {"error": {"message": "Request body exceeds the API limit",
+                                       "type": "invalid_request_error",
+                                       "code": "payload_too_large"}})
             return
 
         if "NEEDLE=" in prompt:

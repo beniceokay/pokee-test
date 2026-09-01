@@ -60,11 +60,12 @@ routing and billing for those are unchanged. The picker entry comes from
 
 **Know before switching** (applies whenever the session is on `pokee-isaac`):
 
-- **Over-limit input is truncated silently** — it degrades quietly instead of
-  erroring, so the window matters more than usual. Pokee describes a 10M
-  window (total, so the reply comes out of it); this project's earlier live
-  testing saw truncation nearer 128k. Run `claude-pokee probe-context` to
-  measure yours rather than trusting either number.
+- **~10M token context**, per Pokee's API reference, with a 45 MiB body cap
+  that binds first on token-dense text. Earlier testing for this project saw
+  truncation nearer 128k, which the documentation contradicts — so
+  `claude-pokee probe-context` measures what your key actually gets before you
+  rely on it. Over-limit input is dropped quietly rather than erroring, which
+  is what makes the number worth checking.
 - Claude Code does not recognize `pokee-isaac`, so it auto-compacts against an
   assumed 200k window. Picker mode cannot correct that without also
   constraining the Claude models sharing the session, so switch early in a
@@ -113,8 +114,9 @@ loop. Expect it to be much weaker than Claude as an agent — see the limits
 above. Every request here is Isaac's, so this mode pins
 `CLAUDE_CODE_MAX_CONTEXT_TOKENS` (default 8,000,000 — Pokee's 10M with headroom
 for the reply) and auto-compact works against that instead of an assumed 200k.
-Export the variable yourself to override it; `probe-context` tells you what to
-set it to.
+The default sits below the documented ~10M ceiling so a long session stays
+clear of the 45 MiB body cap. Export the variable yourself to override it;
+`probe-context` tells you what to set it to.
 
 ## CLI reference
 
@@ -132,23 +134,43 @@ claude-pokee mcp                 MCP stdio server (what the plugin launches)
 - `probe-context` sends a needle-in-front prompt at increasing sizes and
   watches two signals: whether the needle comes back, and whether the server's
   reported `prompt_tokens` matches what was sent. Either one dropping means the
-  window was exceeded. It costs real tokens (the default ladder is ~1.9M input
-  across five requests) so it asks before sending; `--sizes 32000,128000` keeps
-  it cheap and `--yes` skips the prompt.
+  window was exceeded, and a 413 or a timeout is reported as such rather than
+  counted as the window. It costs real tokens — the default ladder is ~1.9M
+  input across five requests, roughly $0.29 — so it prints the estimated cost
+  and asks before sending. `--sizes 32000,128000` keeps it to about a cent, and
+  `--yes` skips the prompt.
 - Router port: `ISAAC_PROXY_PORT` (default 8787). The router is reused if
   already running; its log is `claude-pokee-proxy-<port>.log` in your temp dir.
 - Optional overrides: `POKEE_API_URL`, `POKEE_MODEL`.
 - Windows: the pip-installed `claude-pokee` command works everywhere; the
   plugin's MCP server expects `python3` on PATH.
 
-## Upstream quirks the router works around
+## API limits the client enforces
 
-Found by testing against the live API:
+From Pokee's published API reference. These are enforced locally so a request
+fails immediately with a clear message, rather than after uploading megabytes:
+
+| Documented limit | How it is handled |
+| --- | --- |
+| Output capped at 60,000 tokens (`invalid_max_tokens`); Claude Code asks for 64,000 | Clamped to 60,000 |
+| Bodies over 16 MiB must set `stream: true` and `Accept: text/event-stream`, or the gateway rejects them before reserving credits | Streaming is forced above that size, and the empty-stream retry — which would have to be unstreamed — is refused rather than sent |
+| Request bodies over 45 MiB are rejected (`payload_too_large`) | Refused locally, before upload |
+| ~10M token prompt ceiling; a prompt that large takes ~7 minutes to serve | 15-minute client timeout |
+| Errors use one OpenAI-shaped envelope where `error.code` names the cause | `code` becomes advice (`key_revoked`, `insufficient_credits`, `model_not_found`, …), and 429's `Retry-After` is surfaced |
+
+Bytes are a poor proxy for tokens — the same 1 MB of text can be 140k–700k
+tokens depending on content — so `probe-context` measures against the server's
+reported `usage`, not body size.
+
+Pricing at the time of writing: **$0.15/1M input, $1.00/1M output**, billed in
+whole credits of $0.01 each, rounded up per request. New accounts get 300 free
+credits. Rate limits are 500 requests and 20M tokens per minute.
+
+### Genuine quirks, found by testing
 
 | Quirk | Workaround |
 | --- | --- |
 | Non-streaming tool calls are broken — `finish_reason: "tool_calls"` with an empty body and no `tool_calls` array | Always call upstream with `stream=true` and aggregate, whatever the client asked for |
-| `max_tokens` above 60000 is rejected (`invalid_max_tokens`); Claude Code asks for 64000 | Clamp to 60000 |
 | Cloudflare's WAF 403s the default `Python-urllib` User-Agent | Send a real `User-Agent` |
 
 These may change as Pokee updates their API; `claude-pokee doctor` is the

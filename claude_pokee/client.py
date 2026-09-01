@@ -26,9 +26,35 @@ PROJECT_ROOT = Path.cwd()
 DEFAULT_API_URL = "https://api.pokee.ai/v1/chat/completions"
 DEFAULT_MODEL = "pokee-isaac"
 
+# Documented limits of the Pokee API (developer.pokee.ai). Kept here so the
+# code fails locally with a clear message instead of paying to upload a body
+# the gateway will reject.
+MAX_REQUEST_BYTES = 45 * 1024 * 1024   # hard body cap
+SSE_REQUIRED_BYTES = 16 * 1024 * 1024  # above this, stream=true is mandatory
+MAX_OUTPUT_TOKENS = 60000              # both the default and the maximum
+CONTEXT_TOKENS = 10000000              # ~10M prompt tokens
+
+# Credits are $0.01 each; usage is billed in whole credits, rounded up.
+USD_PER_1M_INPUT = 0.15
+USD_PER_1M_OUTPUT = 1.00
+
 # Isaac generations are long-running by design (5-30s typical, minutes for
-# 32k-token single-file builds).
+# 32k-token single-file builds, and around seven minutes for a 10M-token
+# prompt — hence a timeout far above the usual 30-60s client default).
 DEFAULT_TIMEOUT = 900
+
+# error.code values worth translating into advice, from the documented table.
+_ERROR_HINTS = {
+    "invalid_api_key": "check POKEE_API_KEY",
+    "key_revoked": "this key was revoked — create a new one at developer.pokee.ai",
+    "insufficient_credits": "out of credits — top up at developer.pokee.ai",
+    "payload_too_large": "body exceeds Pokee's {} MiB limit".format(
+        MAX_REQUEST_BYTES // (1024 * 1024)),
+    "large_request_requires_sse": "bodies over {} MiB must set stream=true".format(
+        SSE_REQUIRED_BYTES // (1024 * 1024)),
+    "model_not_found": "check POKEE_MODEL",
+    "invalid_max_tokens": "max_tokens must be <= {:,}".format(MAX_OUTPUT_TOKENS),
+}
 
 
 class IsaacError(Exception):
@@ -91,8 +117,11 @@ def load_config():
     }
 
 
-def _request(config, payload, timeout):
-    body = json.dumps(payload).encode("utf-8")
+def _request(config, payload, timeout, body=None):
+    # Callers that already serialised the payload pass it in: at multi-megabyte
+    # sizes encoding it twice is real memory and CPU.
+    if body is None:
+        body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         config["api_url"],
         data=body,
@@ -115,15 +144,29 @@ def _request(config, payload, timeout):
             detail = exc.read().decode("utf-8", "replace")[:800]
         except Exception:
             pass
-        hint = ""
-        if exc.code in (401, 403):
-            hint = " (check POKEE_API_KEY)"
-        elif exc.code == 402:
-            hint = " (out of balance — top up at developer.pokee.ai)"
-        elif exc.code == 429:
-            hint = " (rate limited — wait and retry)"
+        # Errors share one OpenAI-shaped envelope; error.code names the cause
+        # far more precisely than the status alone.
+        code = ""
+        try:
+            code = ((json.loads(detail) or {}).get("error") or {}).get("code") or ""
+        except ValueError:
+            pass
+
+        hint = _ERROR_HINTS.get(code, "")
+        if not hint:
+            if exc.code in (401, 403):
+                hint = "check POKEE_API_KEY"
+            elif exc.code == 402:
+                hint = "out of credits — top up at developer.pokee.ai"
+            elif exc.code == 429:
+                hint = "rate limited"
+        if exc.code == 429:
+            retry_after = (exc.headers or {}).get("Retry-After")
+            if retry_after:
+                hint = (hint + " — " if hint else "") + "retry after {}s".format(retry_after)
         raise IsaacError(
-            "Pokee API error {}{}: {}".format(exc.code, hint, detail)
+            "Pokee API error {}{}: {}".format(
+                exc.code, " ({})".format(hint) if hint else "", detail)
         ) from exc
     except urllib.error.URLError as exc:
         raise IsaacError("Could not reach {}: {}".format(config["api_url"], exc.reason)) from exc
@@ -169,6 +212,17 @@ def chat(
     the stream comes back empty.
     """
     config = config or load_config()
+
+    # Above 16 MiB the gateway rejects a request that has not negotiated SSE,
+    # before it reserves credits. Decide before serialising: flipping the flag
+    # afterwards would mean encoding a multi-megabyte body twice.
+    approx_bytes = sum(len(msg.get("content") or "") for msg in messages
+                       if isinstance(msg.get("content"), str))
+    if approx_bytes > SSE_REQUIRED_BYTES and not stream:
+        log("[isaac] body is over {} MiB — forcing stream=True, which Pokee "
+            "requires at this size".format(SSE_REQUIRED_BYTES // (1024 * 1024)))
+        stream = True
+
     payload = {
         "model": config["model"],
         "messages": messages,
@@ -176,9 +230,18 @@ def chat(
         "temperature": temperature,
         "stream": bool(stream),
     }
+    body = json.dumps(payload).encode("utf-8")
+    if len(body) > MAX_REQUEST_BYTES:
+        # Fail here rather than spend minutes uploading a body that ends in a 413.
+        raise IsaacError(
+            "Request body is {:.1f} MiB; Pokee's limit is {} MiB. Send less "
+            "context — roughly 10M tokens is the ceiling, and dense text hits "
+            "the byte cap first.".format(
+                len(body) / (1024 * 1024), MAX_REQUEST_BYTES // (1024 * 1024))
+        )
 
     if not stream:
-        with _request(config, payload, timeout) as resp:
+        with _request(config, payload, timeout, body=body) as resp:
             data = json.loads(resp.read().decode("utf-8", "replace"))
         choice = (data.get("choices") or [{}])[0]
         return {
@@ -190,7 +253,7 @@ def chat(
     parts = []
     finish_reason = None
     usage = {}
-    with _request(config, payload, timeout) as resp:
+    with _request(config, payload, timeout, body=body) as resp:
         for data in _iter_sse(resp):
             try:
                 event = json.loads(data)
@@ -210,6 +273,15 @@ def chat(
 
     text = "".join(parts)
     if not text:
+        if len(body) > SSE_REQUIRED_BYTES:
+            # The usual retry is a non-streaming call, which a body this size
+            # is not allowed to make — it would come back 400
+            # large_request_requires_sse and bill nothing useful.
+            raise IsaacError(
+                "Isaac returned an empty stream and the request is too large "
+                "({:.1f} MiB) to retry without streaming.".format(
+                    len(body) / (1024 * 1024))
+            )
         log("[isaac] empty stream, retrying without stream=True")
         return chat(
             messages,

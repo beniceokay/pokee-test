@@ -15,6 +15,7 @@ so `claude-pokee -p "question"` and `claude-pokee --resume` work as expected.
 """
 
 import json
+import math
 import os
 import shutil
 import socket
@@ -211,6 +212,17 @@ CHARS_PER_TOKEN = 4
 DEFAULT_PROBE_SIZES = (32000, 128000, 256000, 512000, 1000000)
 
 
+def _estimate_cost(sizes):
+    """(dollars, credits) for a probe ladder, on Pokee's published input rate.
+
+    Credits are $0.01 and every request bills at least one, rounded up.
+    """
+    dollars = sum(sizes) * client.USD_PER_1M_INPUT / 1e6
+    credits = sum(max(1, int(math.ceil(size * client.USD_PER_1M_INPUT / 1e6 / 0.01)))
+                  for size in sizes)
+    return dollars, credits
+
+
 def _probe_messages(needle, target_tokens):
     """A prompt of roughly target_tokens with a needle pinned to the very front.
 
@@ -306,16 +318,20 @@ def cmd_probe_context(argv):
         print("FAIL: {}".format(exc))
         return 1
 
-    print("Probing {} with a needle-in-front prompt at {} sizes.".format(
-        config["model"], len(sizes)))
-    print("This sends ~{:,} input tokens upstream in total (~{:.1f} MB), and "
-          "Pokee bills you for them.".format(
-              sum(sizes), sum(sizes) * CHARS_PER_TOKEN / 1e6))
-    if max(sizes) > 1000000:
-        print("Note: the largest request is ~{:.1f} MB. Very large uploads can "
-              "trip a gateway size cap or a timeout before the context limit is "
-              "reached; the probe labels those separately rather than counting "
-              "them as the window.".format(max(sizes) * CHARS_PER_TOKEN / 1e6))
+    print("Probing {} with a needle-in-front prompt at {} size{}.".format(
+        config["model"], len(sizes), "" if len(sizes) == 1 else "s"))
+    dollars, credits = _estimate_cost(sizes)
+    print("This sends ~{:,} input tokens upstream in total (~{:.1f} MB), "
+          "costing roughly ${:.2f} — about {} credit{} at Pokee's published "
+          "${:.2f}/1M input rate, which Pokee bills you for.".format(
+              sum(sizes), sum(sizes) * CHARS_PER_TOKEN / 1e6, dollars, credits,
+              "" if credits == 1 else "s", client.USD_PER_1M_INPUT))
+    biggest_mb = max(sizes) * CHARS_PER_TOKEN / (1024 * 1024)
+    if biggest_mb > 16:
+        print("The largest request is ~{:.0f} MiB. Pokee requires streaming "
+              "above 16 MiB (handled automatically) and refuses bodies over "
+              "{} MiB outright; a 10M-token prompt can take ~7 minutes to "
+              "serve.".format(biggest_mb, client.MAX_REQUEST_BYTES // (1024 * 1024)))
     if not assume_yes:
         try:
             answer = input("Continue? [y/N] ")

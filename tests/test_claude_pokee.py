@@ -149,6 +149,49 @@ class ClientTests(FakeUpstreamCase):
             client.chat([{"role": "user", "content": "hi"}])
         self.assertIn("Could not reach", str(caught.exception))
 
+    def test_error_code_becomes_specific_advice(self):
+        for marker, expected in (("REVOKED", "revoked"),
+                                 ("TOOBIG", "45 MiB limit")):
+            with self.assertRaises(client.IsaacError) as caught:
+                client.chat([{"role": "user", "content": marker}])
+            self.assertIn(expected, str(caught.exception))
+
+    def test_rate_limit_surfaces_retry_after(self):
+        with self.assertRaises(client.IsaacError) as caught:
+            client.chat([{"role": "user", "content": "RATELIMIT"}])
+        self.assertIn("retry after 17s", str(caught.exception))
+
+    def test_oversized_body_is_refused_before_upload(self):
+        with _patched(client, MAX_REQUEST_BYTES=2000):
+            with self.assertRaises(client.IsaacError) as caught:
+                client.chat([{"role": "user", "content": "x" * 5000}])
+        self.assertIn("Pokee's limit is", str(caught.exception))
+        self.assertEqual(self.server.requests, [])  # nothing was sent
+
+    def test_the_documented_limits_are_what_we_enforce(self):
+        self.assertEqual(client.MAX_REQUEST_BYTES, 45 * 1024 * 1024)
+        self.assertEqual(client.SSE_REQUIRED_BYTES, 16 * 1024 * 1024)
+        self.assertEqual(client.MAX_OUTPUT_TOKENS, 60000)
+        # The router clamps to the same output ceiling the API documents.
+        self.assertEqual(anthropic_proxy.MAX_COMPLETION_TOKENS,
+                         client.MAX_OUTPUT_TOKENS)
+
+    def test_a_large_body_forces_streaming(self):
+        # Pokee rejects a >16 MiB body that has not negotiated SSE, so the
+        # client must upgrade rather than honour stream=False.
+        with _patched(client, SSE_REQUIRED_BYTES=1000):
+            client.chat([{"role": "user", "content": "hello " + "x" * 4000}],
+                        stream=False)
+        self.assertTrue(self.last_payload()["stream"])
+
+    def test_a_large_body_does_not_retry_unstreamed(self):
+        with _patched(client, SSE_REQUIRED_BYTES=1000):
+            with self.assertRaises(client.IsaacError) as caught:
+                client.chat([{"role": "user", "content": "EMPTYSTREAM " + "x" * 4000}])
+        self.assertIn("too large", str(caught.exception))
+        # One attempt only: the unstreamed retry would just 400.
+        self.assertEqual(len(self.server.requests), 1)
+
     def test_length_stop_auto_resumes_and_stitches(self):
         result = client.chat_complete([{"role": "user", "content": "LONG"}],
                                       max_continuations=2)
@@ -611,6 +654,7 @@ class ProbeCliTests(unittest.TestCase):
         self.assertEqual(done.returncode, 1)
         self.assertIn("Aborted.", done.stdout)
         self.assertIn("bills you", done.stdout)
+        self.assertIn("credit", done.stdout)  # the cost is stated up front
         self.assertEqual(server.requests, [])  # nothing was sent
 
     def test_rejects_nonsense_sizes(self):
