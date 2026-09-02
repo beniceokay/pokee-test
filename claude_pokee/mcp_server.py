@@ -59,6 +59,34 @@ def _resolve_out(path_str):
     return path
 
 
+def _incomplete_warning(code, lang):
+    """Flag a file that stopped early even though the API reported a clean stop.
+
+    `truncated` only tracks finish_reason == "length". Isaac also stops mid-file
+    for its own reasons, and extraction can drop part of a reply, so a False
+    there is not evidence the document is whole — ask the document instead.
+    """
+    if not code:
+        return None
+    lowered = code.lower()
+    head = lowered.lstrip()[:200]
+    is_html = (lang or "").lower() == "html" or head.startswith("<!doctype") or head.startswith("<html")
+    if not is_html:
+        return None
+    if not head.startswith("<!doctype") and not head.startswith("<html"):
+        return (
+            "WARNING: the file does not begin with <!DOCTYPE html> — the reply's "
+            "opening was lost. Rebuild rather than trusting this file."
+        )
+    if "</html>" not in lowered:
+        return (
+            "WARNING: no closing </html> — the file is incomplete even though the "
+            "API reported a clean stop. Call iterate with 'finish the incomplete "
+            "sections', or rebuild."
+        )
+    return None
+
+
 def _describe(path, text, result, extra=None):
     code_note = ""
     if result.get("rounds", 1) > 1:
@@ -159,13 +187,16 @@ def tool_build(args):
         max_continuations=int(args.get("max_continuations", 3)),
     )
 
-    code, lang = client.extract_code(result["text"])
+    code, lang = client.extract_artifact(result["text"])
     extra = []
     if code is None:
         code = result["text"]
         extra.append("NOTE: no code block in the response — wrote the raw reply.")
     elif lang:
         extra.append("language: {}".format(lang))
+    warning = _incomplete_warning(code, lang)
+    if warning:
+        extra.append(warning)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(code, encoding="utf-8")
@@ -207,7 +238,7 @@ def tool_iterate(args):
         max_continuations=int(args.get("max_continuations", 3)),
     )
 
-    code, _ = client.extract_code(result["text"])
+    code, lang = client.extract_artifact(result["text"])
     if code is None:
         raise IsaacError(
             "Isaac did not return a code block — file left untouched. "
@@ -223,6 +254,9 @@ def tool_iterate(args):
     extra = ["previous size: {:,} bytes".format(len(current.encode("utf-8")))]
     if backup:
         extra.append("backup: {}".format(backup))
+    warning = _incomplete_warning(code, lang)
+    if warning:
+        extra.append(warning)
     return _describe(path, code, result, extra)
 
 

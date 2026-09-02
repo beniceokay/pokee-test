@@ -5,6 +5,8 @@ last user message so a single server can cover every branch:
 
   TOOLCALL     stream an OpenAI tool_calls delta, finish_reason=tool_calls
   LONG         finish_reason=length until the client sends a continuation turn
+  LONGNARRATE  as LONG, but the resume round narrates before re-opening
+               the fence (the shape that used to corrupt an artifact)
   EMPTYSTREAM  stream with no content deltas (exercises the non-stream retry)
   CODE         reply with prose around a fenced html block
   BOOM         respond 402, to exercise HTTPError handling
@@ -164,6 +166,16 @@ class FakeHandler(BaseHTTPRequestHandler):
         # A continuation turn carries the resume prompt, not the original marker,
         # so it has to be matched before anything else.
         if "Continue from exactly where you left off" in prompt:
+            if "NARRATE" in prompt:
+                # Isaac sometimes narrates the resume before re-opening the
+                # fence; both must be stripped or they land in the artifact.
+                self._stream([
+                    _chunk({"content": "Need to continue the file exactly from "
+                                       "where it was cut off. The last line was:\n"
+                                       "```html\nPART2"}),
+                    _chunk({}, finish="stop"),
+                ])
+                return
             # The re-opened code fence a resume round emits must get stripped.
             self._stream([_chunk({"content": "```\nPART2"}), _chunk({}, finish="stop")])
             return

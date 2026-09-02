@@ -206,6 +206,70 @@ class ClientTests(FakeUpstreamCase):
         self.assertTrue(result["truncated"])
 
 
+class ResumeArtifactTests(FakeUpstreamCase):
+    def test_narrated_resume_leaves_no_prose_or_fence_in_the_artifact(self):
+        result = client.chat_complete(
+            [{"role": "user", "content": "LONGNARRATE"}], max_continuations=2)
+        self.assertEqual(result["text"], "PART1PART2")
+        self.assertNotIn("cut off", result["text"])
+        self.assertNotIn("```", result["text"])
+
+    def test_code_resuming_mid_function_is_not_mistaken_for_narration(self):
+        # A resume can legitimately begin with `continue;` — stripping it would
+        # silently delete a line of the file.
+        resumed = "      continue;\n    }\n"
+        self.assertEqual(client._strip_resume_artifacts(resumed), resumed)
+
+    def test_a_resume_that_starts_mid_token_keeps_its_leading_characters(self):
+        self.assertEqual(client._strip_resume_artifacts("f, f, 0.12);"), "f, f, 0.12);")
+
+
+class ExtractArtifactTests(unittest.TestCase):
+    def test_blocks_after_the_document_are_kept_not_discarded(self):
+        # The real failure: a long build came back as several fenced blocks and
+        # extract_code() kept only the largest, writing mid-file JS to disk.
+        text = (
+            "```html\n<!DOCTYPE html>\n<title>game</title>\n```\n"
+            "continuing\n"
+            "```js\nfunction buildLevel(i){ /* a much longer block */ }\n```\n"
+            "```html\n</html>\n```"
+        )
+        code, lang = client.extract_artifact(text)
+        self.assertEqual(lang, "html")
+        self.assertTrue(code.lstrip().startswith("<!DOCTYPE html>"))
+        self.assertIn("buildLevel", code)
+        self.assertIn("</html>", code)
+
+    def test_falls_back_to_extract_code_without_a_document_block(self):
+        text = "intro\n```js\nx\n```\nmid\n```py\nbigger block here\n```"
+        code, lang = client.extract_artifact(text)
+        self.assertEqual(lang, "py")
+        self.assertIn("bigger block", code)
+
+    def test_prose_yields_nothing(self):
+        self.assertEqual(client.extract_artifact("just some prose"), (None, None))
+
+
+class IncompleteWarningTests(unittest.TestCase):
+    def test_html_without_a_closing_tag_is_flagged(self):
+        warning = mcp_server._incomplete_warning(
+            "<!DOCTYPE html>\n<title>x</title>\n<script>foo(", "html")
+        self.assertIsNotNone(warning)
+        self.assertIn("</html>", warning)
+
+    def test_a_lost_opening_is_flagged(self):
+        warning = mcp_server._incomplete_warning("function buildLevel(i){", "html")
+        self.assertIsNotNone(warning)
+        self.assertIn("DOCTYPE", warning)
+
+    def test_a_complete_document_is_not_flagged(self):
+        self.assertIsNone(mcp_server._incomplete_warning(
+            "<!DOCTYPE html>\n<title>x</title>\n</html>\n", "html"))
+
+    def test_non_html_is_left_alone(self):
+        self.assertIsNone(mcp_server._incomplete_warning("print('hi')", "python"))
+
+
 class ExtractCodeTests(unittest.TestCase):
     def test_picks_the_largest_fenced_block(self):
         text = "intro\n```js\nx\n```\nmid\n```html\n<p>bigger block here</p>\n```\nend"
