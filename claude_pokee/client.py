@@ -13,6 +13,7 @@ Never writes to stdout: the MCP server owns stdout for JSON-RPC framing.
 
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -351,14 +352,101 @@ def chat_complete(
     }
 
 
+_RESUME_HINT = re.compile(
+    r"\b(?:cut off|left off|last line|continue the file|continuing the file|"
+    r"resuming|picking up where)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_resume_narration(line):
+    """True for a prose line a resume round wrote *about* resuming.
+
+    Deliberately strict. Code resuming mid-function can legitimately start with
+    words like `continue`, so a line only counts as narration when it reads as a
+    sentence: several words, no code punctuation, and an explicit resume phrase.
+    """
+    if any(ch in line for ch in "{};<>=()"):
+        return False
+    if len(line.split()) < 4:
+        return False
+    return bool(_RESUME_HINT.search(line))
+
+
 def _strip_resume_artifacts(text):
-    """Drop a leading code fence a continuation round may have re-opened."""
-    stripped = text.lstrip()
-    if stripped.startswith("```"):
-        newline = stripped.find("\n")
-        if newline != -1:
-            return stripped[newline + 1 :]
-    return text
+    """Drop what a continuation round prepends before the resumed content.
+
+    Two things turn up, and both corrupt the artifact if left in place: a
+    re-opened code fence, and a line of narration such as "Need to continue the
+    file exactly from where it was cut off." The fence is the damaging one — it
+    splits the stitched reply into several fenced blocks, and picking one of
+    them then discards the rest of the file.
+
+    Anything that is neither is returned untouched, so a round that resumes
+    mid-token keeps its leading characters.
+    """
+    out = text
+    for _ in range(2):  # narration, then the fence it introduces
+        stripped = out.lstrip()
+        if stripped.startswith("```"):
+            newline = stripped.find("\n")
+            if newline == -1:
+                return ""
+            out = stripped[newline + 1 :]
+            continue
+        line, sep, rest = stripped.partition("\n")
+        if sep and _is_resume_narration(line):
+            out = rest
+            continue
+        break
+    return out
+
+
+def _fenced_blocks(text):
+    """Every fenced block in `text`, in order, as (body, language)."""
+    blocks = []
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines):
+        if lines[i].lstrip().startswith("```"):
+            lang = lines[i].lstrip()[3:].strip() or None
+            body = []
+            i += 1
+            while i < len(lines) and not lines[i].lstrip().startswith("```"):
+                body.append(lines[i])
+                i += 1
+            blocks.append(("\n".join(body), lang))
+        i += 1
+    return blocks
+
+
+def _starts_a_document(body):
+    head = body.lstrip()[:200].lower()
+    return head.startswith("<!doctype") or head.startswith("<html")
+
+
+def extract_artifact(text):
+    """Pull a single-file artifact out of a build reply.
+
+    extract_code() keeps only the largest fenced block, which is right when a
+    reply is prose around one snippet but wrong for a build: a long file comes
+    back as several blocks — Isaac narrates between sections, or a resume
+    re-opens the fence — and keeping the biggest silently discards the rest.
+    Observed in the wild as a 32,947-token reply that landed on disk as 1,751
+    bytes of mid-file JavaScript.
+
+    So anchor on the block that opens the document and treat every later block
+    as its continuation. With no such block this is exactly extract_code().
+    """
+    blocks = _fenced_blocks(text)
+    start = next((i for i, (body, _) in enumerate(blocks) if _starts_a_document(body)), None)
+    if start is None:
+        return extract_code(text)
+
+    body, lang = blocks[start]
+    parts = [body] + [b for b, _ in blocks[start + 1 :]]
+    joined = "\n".join(p.strip("\n") for p in parts if p.strip())
+    return joined + "\n", lang or "html"
 
 
 def extract_code(text):
