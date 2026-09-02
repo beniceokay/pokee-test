@@ -16,11 +16,17 @@ Stdlib Python only, no dependencies. **Unofficial** — not affiliated with
 Pokee AI or Anthropic. You need your own Pokee API key
 (developer.pokee.ai → API Keys).
 
-> **This repository is a working copy for testing.** The upstream project is
+> **This is a fork.** Upstream is
 > [TheMarco/claude-pokee](https://github.com/TheMarco/claude-pokee) by Marco
-> van Hylckama Vlieg, MIT-licensed; the links and package metadata below still
-> point there. Added on top of it here: the offline test suite under `tests/`
-> and the `probe-context` command.
+> van Hylckama Vlieg, MIT-licensed; the install instructions and package
+> metadata below still point there. Added on top of it here:
+>
+> - an offline test suite under `tests/` — stdlib only, no key, no network
+> - the `probe-context` command, and the [measured results](#measured-context-window)
+>   it produced: the window held intact to 11,151,574 server-counted tokens,
+>   which contradicts the ~128k truncation this project previously reported
+> - a fix for `build`/`iterate` silently writing a partial file when a long
+>   reply came back as several fenced blocks
 
 ## Install
 
