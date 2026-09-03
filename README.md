@@ -59,6 +59,14 @@ local router (127.0.0.1, default port 8787) and points Claude Code at it:
 | `claude-*` (or missing) | `api.anthropic.com`, byte-for-byte — auth headers, query string, and SSE stream untouched |
 | anything else | translated to Pokee's OpenAI-style API |
 
+Both local servers (this router and `claude-pokee chat`) answer only
+requests whose `Host` is loopback and whose `Origin`, if a browser sent
+one, is the server itself. Anything else gets a 403 before any upstream
+call. Loopback alone is not enough: a web page can POST to `127.0.0.1`
+without a preflight and spend your Pokee credits or write into `builds/`
+even though it cannot read the reply, and DNS rebinding puts a foreign
+name in `Host`.
+
 The launcher sets **no** `ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_API_KEY`, so your
 saved claude.ai login remains the active credential for Anthropic models —
 routing and billing for those are unchanged. The picker entry comes from

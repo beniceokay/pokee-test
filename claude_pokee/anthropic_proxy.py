@@ -316,7 +316,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.wfile.write(b"0\r\n\r\n")
             self.wfile.flush()
 
+    def _refuse_if_not_local(self):
+        """403 anything that is not a local, non-browser client. True if refused."""
+        why = client.local_request_error(self.headers)
+        if why:
+            self.close_connection = True
+            self._error(403, why, "permission_error")
+        return bool(why)
+
     def do_GET(self):
+        if self._refuse_if_not_local():
+            return
         if self.route == "/router":
             # Capability probe — lets launchers detect a stale pre-router proxy.
             self._send_json(200, {"ok": True, "router": True})
@@ -335,6 +345,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length)
+        if self._refuse_if_not_local():
+            return
         try:
             body = json.loads(raw or b"{}")
         except ValueError:

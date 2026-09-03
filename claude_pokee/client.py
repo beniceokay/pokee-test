@@ -18,6 +18,7 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 
 # The working directory at launch: where .env is looked up, where builds/
 # lands, and the MCP server's write-confinement root. Deliberately NOT the
@@ -85,6 +86,32 @@ def _parse_env_file(path):
         if key:
             values[key] = val
     return values
+
+
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def local_request_error(headers):
+    """Why an HTTP request to one of the local servers must be refused, or None.
+
+    Both servers bind to loopback, but loopback is not private to the user:
+    a web page can POST to 127.0.0.1 without a preflight (the response is
+    unreadable, the Pokee credits are still spent, the file is still
+    written), and DNS rebinding puts a hostile name in Host. So the Host
+    must name this machine, and a browser Origin must be this server
+    itself — the chat page — never a third-party site.
+    """
+    host = headers.get("Host", "")
+    try:
+        hostname = urlsplit("//" + host).hostname
+    except ValueError:
+        hostname = None
+    if hostname not in _LOOPBACK_HOSTS:
+        return "Host {!r} is not this machine; only loopback is served".format(host)
+    origin = headers.get("Origin")
+    if origin is not None and urlsplit(origin).netloc.lower() != host.lower():
+        return "Origin {!r} is not this server; cross-site browser requests are refused".format(origin)
+    return None
 
 
 def load_config():

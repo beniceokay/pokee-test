@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import fake_pokee  # noqa: E402
-from claude_pokee import anthropic_proxy, cli, client, mcp_server  # noqa: E402
+from claude_pokee import anthropic_proxy, chat_server, cli, client, mcp_server  # noqa: E402
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -354,6 +354,31 @@ class TranslateTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------
+# local-only guard
+# --------------------------------------------------------------------------
+
+class LocalRequestTests(unittest.TestCase):
+    def test_plain_local_client_is_allowed(self):
+        for host in ("127.0.0.1:8787", "localhost:8787", "[::1]:8787", "127.0.0.1"):
+            self.assertIsNone(client.local_request_error({"Host": host}), host)
+
+    def test_hostile_host_is_refused(self):
+        # DNS rebinding: attacker.example resolves to 127.0.0.1, Host says otherwise.
+        for host in ("attacker.example:8787", "127.0.0.1.attacker.example", "", "[::"):
+            self.assertIsNotNone(client.local_request_error({"Host": host}), repr(host))
+
+    def test_cross_site_origin_is_refused(self):
+        headers = {"Host": "127.0.0.1:8787", "Origin": "https://attacker.example"}
+        self.assertIsNotNone(client.local_request_error(headers))
+        headers["Origin"] = "null"
+        self.assertIsNotNone(client.local_request_error(headers))
+
+    def test_same_origin_page_is_allowed(self):
+        headers = {"Host": "127.0.0.1:8766", "Origin": "http://127.0.0.1:8766"}
+        self.assertIsNone(client.local_request_error(headers))
+
+
+# --------------------------------------------------------------------------
 # router
 # --------------------------------------------------------------------------
 
@@ -392,6 +417,26 @@ class ProxyTests(FakeUpstreamCase):
                               "max_tokens": 10})
         self.assertEqual(status, 200)
         self.assertTrue(json.loads(body)["passthrough"])
+
+    def _expect_403(self, headers, path="/v1/messages"):
+        payload = {"model": "pokee-isaac", "messages": [{"role": "user", "content": "hi"}],
+                   "max_tokens": 10}
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            _post(self.url + path, payload, headers)
+        self.assertEqual(ctx.exception.code, 403)
+        self.assertEqual(json.load(ctx.exception)["error"]["type"], "permission_error")
+
+    def test_cross_site_browser_post_is_refused_before_spending(self):
+        self._expect_403({"Origin": "https://attacker.example"})
+        self.assertEqual(self.server.requests, [])
+
+    def test_rebound_host_is_refused(self):
+        self._expect_403({"Host": "attacker.example"})
+        self.assertEqual(self.server.requests, [])
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(urllib.request.Request(
+                self.url + "/health", headers={"Host": "attacker.example"}), timeout=5)
+        self.assertEqual(ctx.exception.code, 403)
 
     def test_unknown_paths_pass_through(self):
         with urllib.request.urlopen(self.url + "/v1/models", timeout=5) as resp:
@@ -475,6 +520,50 @@ class ProxyTests(FakeUpstreamCase):
                        "messages": [{"role": "user", "content": "hi"}]})
         body = json.loads(caught.exception.read().decode())
         self.assertEqual(body["error"]["type"], "authentication_error")
+
+
+# --------------------------------------------------------------------------
+# chat server
+# --------------------------------------------------------------------------
+
+class ChatServerTests(FakeUpstreamCase):
+    def setUp(self):
+        super().setUp()
+        import shutil
+        import threading
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        saved = chat_server.BUILD_DIR
+        chat_server.BUILD_DIR = self.tmp / "builds"
+        self.addCleanup(setattr, chat_server, "BUILD_DIR", saved)
+
+        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), chat_server.ChatHandler)
+        self.srv.daemon_threads = True
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.addCleanup(self.srv.shutdown)
+        self.addCleanup(self.srv.server_close)
+        self.url = "http://127.0.0.1:{}".format(self.srv.server_port)
+
+    def test_cross_site_save_is_refused_and_writes_nothing(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            _post(self.url + "/api/save", {"filename": "x.html", "content": "<p>hi</p>"},
+                  {"Origin": "https://attacker.example"})
+        self.assertEqual(ctx.exception.code, 403)
+        self.assertFalse((self.tmp / "builds").exists())
+
+    def test_cross_site_chat_is_refused_before_spending(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            _post(self.url + "/api/chat", {"messages": [{"role": "user", "content": "hi"}]},
+                  {"Origin": "https://attacker.example"})
+        self.assertEqual(ctx.exception.code, 403)
+        self.assertEqual(self.server.requests, [])
+
+    def test_the_chat_page_itself_can_save(self):
+        status, _ = _post(self.url + "/api/save",
+                          {"filename": "x.html", "content": "<p>hi</p>"},
+                          {"Origin": self.url})
+        self.assertEqual(status, 200)
+        self.assertEqual((self.tmp / "builds" / "x.html").read_text(), "<p>hi</p>")
 
 
 # --------------------------------------------------------------------------

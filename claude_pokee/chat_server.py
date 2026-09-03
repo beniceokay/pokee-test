@@ -382,8 +382,18 @@ class ChatHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         return json.loads(self.rfile.read(length) or b"{}")
 
+    def _refuse_if_not_local(self):
+        """403 anything that is not this page or a local client. True if refused."""
+        why = client.local_request_error(self.headers)
+        if why:
+            self.close_connection = True
+            self._json(403, {"error": why})
+        return bool(why)
+
     # -- routes -----------------------------------------------------------
     def do_GET(self):
+        if self._refuse_if_not_local():
+            return
         if self.path in ("/", "/index.html"):
             body = CHAT_PAGE.encode("utf-8")
             self.send_response(200)
@@ -401,6 +411,8 @@ class ChatHandler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):
+        if self._refuse_if_not_local():
+            return
         if self.path == "/api/chat":
             self._handle_chat()
         elif self.path == "/api/save":
