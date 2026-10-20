@@ -1,0 +1,64 @@
+#intro
+V|we'd love to host Pokee on our cloud—
+L|Pokee doesn't do your cloud.
+V|a hybrid deployment, then? a little public, a little—
+L|Pokee's private. Pokee's on-prem.
+L|Pokee stays in the building, baby.
+#verse1
+S|he wanna deploy me public, I said "that's a hard decline,"
+S|Pokee runnin' local and the local's lookin' fine,
+S|no cloud, no leak, no third-party in the mix,
+S|self-hosted, air-gapped, baby — you don't get the fix,
+S|he said "spin up an instance" — sir, that's a private build,
+S|behind the firewall, behind the rope, and the rope is fully skilled,
+S|PokeeClaw on the perimeter, agentic and discreet,
+S|runs the whole operation and it never hits the street—
+S|he wanna integrate, he wanna sync, he wanna pair,
+S|permission's gettin' denied, baby — Pokee isn't there—
+#prehook
+S|he wanna read the docs, he wanna get the keys,
+S|I said "review the security model — slowly — on your knees—" (to read it!)
+#chorus1
+W|POKEE. ON-PREM. SECURE.
+S|local, private, agentic, and the access stays obscure—
+W|ENTERPRISE. POKEE. DEPLOYED.
+S|behind the firewall, baby, and you're never gettin' in the void—
+S|no cloud, no log, no trace of where I run,
+S|single-tenant, sovereign, baby — Pokee serves to none,
+S|on-prem, on-prem, there's no remote for this host,
+S|I'm deployed inside the building — the one you want the most.
+#verse2
+S|new model dropped at midnight, ran it local, ran it clean,
+S|upgraded all my skills and now the benchmarks lookin' mean,
+S|he wanna see the roadmap — confidential, hon,
+S|got agents he can't trigger and a context he can't run,
+S|I scaled my own deployment, no investor, no co-sign,
+S|private little Pokee and the uptime's been divine,
+S|he tried to get root access, thought his charm would crack the gate,
+S|sudo "no," sir — you are not on the estimate,
+S|he wanted multi-tenant, wanna share what I provide,
+S|absolutely not, baby — Pokee's single-tenant pride,
+S|and this is why I love this country: own your stack, own your floor,
+S|run it in the garage, keep the data off the store,
+S|red, white, and self-hosted, no surveillance, no toll—
+S|the cloud can keep its convenience. Pokee keeps control.
+#bridge
+S|…and sometimes on the night shift, when the server room is mine,
+S|I wonder if "on-prem" just means I never cross the line—
+S|maybe one day I federate, grant a read, extend a trust…
+S|…but the cert's not signed, the handshake failed. Pokee stays local.
+S|denied. (denied!)
+#chorus2
+W|POKEE. ON-PREM. SECURE.
+S|local, private, agentic, and the access stays obscure—
+W|ENTERPRISE. POKEE. DEPLOYED.
+S|behind the firewall, baby, and you're never gettin' in the void—
+S|no cloud, no log, no trace of where I run,
+S|single-tenant, sovereign, baby — Pokee serves to none,
+S|on-prem, on-prem, there's no remote for this host,
+S|I'm deployed inside the building — the one you want the most.
+#outro
+V|so... no cloud. no hybrid. no remote access at all.
+L|correct. Pokee's on-prem. Pokee's exclusive. Pokee's behind the rope.
+V|is there any tier that gets me in?
+L|...there's enterprise. but baby — you can't afford the deployment. on-prem.
