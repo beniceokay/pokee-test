@@ -427,8 +427,12 @@ function renderLayered(idx,t,fbo,mood,kick){
   const dur=Math.max(0.001,s.end-s.start);
   let scale=tr.scale; if(s.move==='punch') scale*=1+0.015*b.kickPulse;
   if(mood==='chorus') scale*=b.downPulse;
+  let focus=tr.focus, ox=tr.ox, oy=tr.oy;
+  if(s.crop){ const c=(sceneH>sceneW)?s.crop.vert:s.crop.land; scale*=c.scale; focus=c.focus;
+    // centre the crop window on its focus (base transform zooms about focus, so shift it to screen centre)
+    ox+=(focus[0]-0.5)/scale; oy+=(focus[1]-0.5)/scale; }
   Footage2.renderShot({fbo:fbo.f,W:sceneW,H:sceneH,image:IMAGES[s.img],imageIndex:s.img,shot:s,shotIndex:idx,t,
-    u:clamp((t-s.start)/dur,0,1),base:{scale,ox:tr.ox,oy:tr.oy,focus:tr.focus},kick,kickPulse:b.kickPulse,
+    u:clamp((t-s.start)/dur,0,1),base:{scale,ox,oy,focus},kick,kickPulse:b.kickPulse,
     beatPhase:b.beatPhase,beatIndex:b.beatIndex,bar2Phase:b.bar2Phase,downPulse:b.downPulse,mood,
     sinceStart:t-s.start,behindTex:texBehind});
   gl.disable(gl.BLEND); gl.activeTexture(gl.TEXTURE0);

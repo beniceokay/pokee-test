@@ -27,3 +27,12 @@ for k,sh in enumerate(T['shots']):
 open('../pokee2/site/timeline.js','w').write('window.TIMELINE='+json.dumps(T,separators=(',',':'))+';\n')
 from collections import Counter
 print(Counter(s['fg'] for s in T['shots']),Counter(s['bg'] for s in T['shots']),sum(i['hasSubject'] for i in T['images']))
+# --- gun-free re-framing for three shots (image-space window centre + zoom; y down) ---
+CROPS={67:{'land':{'scale':2.17,'focus':[0.625,0.27]},'vert':{'scale':1.25,'focus':[0.53,0.50]}},
+       41:{'land':{'scale':1.79,'focus':[0.72,0.38]},'vert':{'scale':1.30,'focus':[0.60,0.42]}},
+       46:{'land':{'scale':2.38,'focus':[0.61,0.64]},'vert':{'scale':1.75,'focus':[0.66,0.72]}}}
+for sh in T['shots']:
+    if sh['img'] in CROPS:
+        sh['crop']=CROPS[sh['img']]; sh['move']='pushin'; sh['fg']='float'
+open('../pokee2/site/timeline.js','w').write('window.TIMELINE='+json.dumps(T,separators=(',',':'))+';\n')
+print('crops applied',[ (k,s['img']) for k,s in enumerate(T['shots']) if 'crop' in s])
