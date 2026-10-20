@@ -244,7 +244,7 @@ const MELODY=[
 ];
 
 /* ---------- audio engine ---------- */
-let actx=null, master, comp, warmLP, convolver, wetGain, dryGain, analyser, freqData;
+let actx=null, master, comp, warmLP, limiter, limGain, volGain, convolver, wetGain, dryGain, analyser, freqData;
 let padBus, padLP, padLFO, padLFOGain, keyBus, keyLP, keyTrem, keyTremGain;
 let drumBus, bassBus, leadBus, fxBus, rainGain, rainNoise, rainFilter, rainLFO;
 let noiseBuf, crackleBuf, crackleSrc, crackleGain;
@@ -266,43 +266,48 @@ function buildAudio(){
   const sr=actx.sampleRate;
   noiseBuf=makeNoise();
 
-  master=actx.createGain(); master.gain.value=0.9;
+  master=actx.createGain(); master.gain.value=0.5;
   comp=actx.createDynamicsCompressor();
-  comp.threshold.value=-18;comp.knee.value=24;comp.ratio.value=3;
+  comp.threshold.value=-14;comp.knee.value=12;comp.ratio.value=2.5;
   comp.attack.value=0.01;comp.release.value=0.25;
   warmLP=actx.createBiquadFilter();warmLP.type='lowpass';warmLP.frequency.value=15000;warmLP.Q.value=0.4;
+  limiter=actx.createDynamicsCompressor();
+  limiter.threshold.value=-3;limiter.knee.value=0;limiter.ratio.value=20;
+  limiter.attack.value=0.002;limiter.release.value=0.1;
+  limGain=actx.createGain();limGain.gain.value=0.8;
+  volGain=actx.createGain();volGain.gain.value=vol;
   analyser=actx.createAnalyser();analyser.fftSize=2048;analyser.smoothingTimeConstant=0.8;
   freqData=new Uint8Array(analyser.frequencyBinCount);
 
-  convolver=actx.createConvolver();convolver.buffer=makeIR(2.8,2.6);
-  wetGain=actx.createGain();wetGain.gain.value=0.32;
+  convolver=actx.createConvolver();convolver.buffer=makeIR(2.8,2.6);convolver.normalize=true;
+  wetGain=actx.createGain();wetGain.gain.value=0.18;
   dryGain=actx.createGain();dryGain.gain.value=1;
 
   // buses
-  padBus=actx.createGain();padBus.gain.value=1;
+  padBus=actx.createGain();padBus.gain.value=0.18;
   padLP=actx.createBiquadFilter();padLP.type='lowpass';padLP.frequency.value=800;padLP.Q.value=0.7;
   padLFO=actx.createOscillator();padLFO.frequency.value=0.08;
   padLFOGain=actx.createGain();padLFOGain.gain.value=220;
   padLFO.connect(padLFOGain);padLFOGain.connect(padLP.frequency);padLFO.start();
   padBus.connect(padLP);padLP.connect(dryGain);padLP.connect(convolver);
 
-  keyBus=actx.createGain();keyBus.gain.value=1;
+  keyBus=actx.createGain();keyBus.gain.value=0.30;
   keyLP=actx.createBiquadFilter();keyLP.type='lowpass';keyLP.frequency.value=2200;keyLP.Q.value=0.5;
   keyTrem=actx.createOscillator();keyTrem.frequency.value=4.5;
-  keyTremGain=actx.createGain();keyTremGain.gain.value=0.06;
+  keyTremGain=actx.createGain();keyTremGain.gain.value=0.03;
   keyTrem.connect(keyTremGain);keyTremGain.connect(keyBus.gain);keyTrem.start();
   keyBus.connect(keyLP);keyLP.connect(dryGain);keyLP.connect(convolver);
 
-  drumBus=actx.createGain();drumBus.gain.value=1;drumBus.connect(dryGain);
-  bassBus=actx.createGain();bassBus.gain.value=1;
+  drumBus=actx.createGain();drumBus.gain.value=0.45;drumBus.connect(dryGain);
+  bassBus=actx.createGain();bassBus.gain.value=0.35;
   const bassLP=actx.createBiquadFilter();bassLP.type='lowpass';bassLP.frequency.value=420;bassLP.Q.value=0.6;
   bassBus.connect(bassLP);bassLP.connect(dryGain);
 
-  leadBus=actx.createGain();leadBus.gain.value=1;
+  leadBus=actx.createGain();leadBus.gain.value=0.22;
   const leadLP=actx.createBiquadFilter();leadLP.type='lowpass';leadLP.frequency.value=3600;leadLP.Q.value=0.6;
   leadBus.connect(leadLP);leadLP.connect(dryGain);leadLP.connect(convolver);
 
-  fxBus=actx.createGain();fxBus.gain.value=1;fxBus.connect(dryGain);fxBus.connect(convolver);
+  fxBus=actx.createGain();fxBus.gain.value=0.5;fxBus.connect(dryGain);fxBus.connect(convolver);
 
   // rain
   rainGain=actx.createGain();rainGain.gain.value=0;
@@ -315,7 +320,7 @@ function buildAudio(){
   // vinyl crackle
   crackleBuf=makeCrackle(3);
   crackleSrc=actx.createBufferSource();crackleSrc.buffer=crackleBuf;crackleSrc.loop=true;
-  crackleGain=actx.createGain();crackleGain.gain.value=0.12;
+  crackleGain=actx.createGain();crackleGain.gain.value=0.04;
   crackleSrc.connect(crackleGain);crackleGain.connect(dryGain);crackleGain.connect(convolver);crackleSrc.start();
 
   // tape wow (shared detune LFO, ~7 cents) — connected to each voice's osc.detune
@@ -325,7 +330,8 @@ function buildAudio(){
 
   // chain
   dryGain.connect(master);convolver.connect(wetGain);wetGain.connect(master);
-  master.connect(comp);comp.connect(warmLP);warmLP.connect(analyser);analyser.connect(actx.destination);
+  master.connect(comp);comp.connect(warmLP);warmLP.connect(limiter);
+  limiter.connect(limGain);limGain.connect(volGain);volGain.connect(analyser);analyser.connect(actx.destination);
 }
 function makeCrackle(sec){
   const len=Math.floor(actx.sampleRate*sec), b=actx.createBuffer(1,len,actx.sampleRate);
@@ -335,7 +341,8 @@ function makeCrackle(sec){
   return b;
 }
 function killAudio(){
-  actx=null;master=null;comp=null;warmLP=null;convolver=null;
+  actx=null;master=null;comp=null;warmLP=null;limiter=null;limGain=null;volGain=null;
+  convolver=null;
   wetGain=null;dryGain=null;analyser=null;freqData=null;
   padBus=null;padLP=null;padLFO=null;padLFOGain=null;
   keyBus=null;keyLP=null;keyTrem=null;keyTremGain=null;
@@ -353,7 +360,7 @@ function padChord(t,notes,dur){
   const o3=actx.createOscillator();o3.type='sawtooth';o3.frequency.value=midiHz(notes[0]-12);o3.detune.value=3;
   o1.connect(g);o2.connect(g);o3.connect(g);
   if(wowGain){wowGain.connect(o1.detune);wowGain.connect(o2.detune);wowGain.connect(o3.detune);}
-  const a=0.6,s=0.7,r=1.6;
+  const a=0.15,s=0.7,r=1.6;
   g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(a,t+a);
   g.gain.linearRampToValueAtTime(a*s,t+dur*0.7);g.gain.linearRampToValueAtTime(0.0001,t+dur+r);
   [o1,o2,o3].forEach(o=>{o.start(t);o.stop(t+dur+r+0.1);});
@@ -378,18 +385,18 @@ function bassNote(t,midi,dur){
   const g=actx.createGain();g.gain.value=0;g.connect(bassBus);
   const o=actx.createOscillator();o.type='sine';o.frequency.value=midiHz(midi);
   const o2=actx.createOscillator();o2.type='triangle';o2.frequency.value=midiHz(midi);
-  const o2g=actx.createGain();o2g.gain.value=0.35;o2.connect(o2g);o2g.connect(g);
+  const o2g=actx.createGain();o2g.gain.value=0.3;o2.connect(o2g);o2g.connect(g);
   o.connect(g);
   if(wowGain){wowGain.connect(o.detune);wowGain.connect(o2.detune);}
   const a=0.012;
-  g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(0.34,t+a);
-  g.gain.setValueAtTime(0.34,t+dur*0.7);g.gain.linearRampToValueAtTime(0.0001,t+dur+0.06);
+  g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(0.25,t+a);
+  g.gain.setValueAtTime(0.25,t+dur*0.7);g.gain.linearRampToValueAtTime(0.0001,t+dur+0.06);
   o.start(t);o.stop(t+dur+0.1);o2.start(t);o2.stop(t+dur+0.1);
 }
 function kick(t){
   const o=actx.createOscillator();o.type='sine';
   o.frequency.setValueAtTime(150,t);o.frequency.exponentialRampToValueAtTime(46,t+0.12);
-  const g=actx.createGain();g.gain.setValueAtTime(0.9,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.32);
+  const g=actx.createGain();g.gain.setValueAtTime(0.45,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.32);
   o.connect(g);g.connect(drumBus);o.start(t);o.stop(t+0.34);
   const c=actx.createBufferSource();c.buffer=noiseBuf;
   const cg=actx.createGain();cg.gain.setValueAtTime(0.25,t);cg.gain.exponentialRampToValueAtTime(0.001,t+0.03);
@@ -446,8 +453,8 @@ function scheduleBar(bar,t){
     const b0=t+0.004;
     kick(b0);
     kick(t+BEAT*1.5);
-    snare(t+BEAT*1+SWING8*BEAT,0.5);
-    snare(t+BEAT*3+SWING8*BEAT,0.5);
+    snare(t+BEAT*1+SWING8*BEAT,0.35);
+    snare(t+BEAT*3+SWING8*BEAT,0.35);
     for(let i=0;i<8;i++){
       const off=i*BEAT*0.5;
       const human=(Math.random()-0.5)*0.012;
@@ -490,7 +497,7 @@ function goToSection(i){
   currentSceneIdx=SCENE_BY_NAME[SECTIONS[i].scene];prevSceneIdx=-1;sceneFade=0;
   glitchT=0.55;
   if(state==='playing'){
-    lastRender=actx?actx.currentTime-(t-RESUME):0;
+    lastRender=actx?nextNoteTime-nextBar*BAR:0;
     lastRenderWall=performance.now()/1000-(t-RESUME);
   }
 }
@@ -499,15 +506,15 @@ function start(){
   try{
     buildAudio();
     actx.resume();
-    master.gain.setValueAtTime(0,actx.currentTime);
-    master.gain.linearRampToValueAtTime(vol,actx.currentTime+2.0);
+    volGain.gain.setValueAtTime(0,actx.currentTime);
+    volGain.gain.linearRampToValueAtTime(vol,actx.currentTime+2.0);
   }catch(err){
     console.warn('audio init failed — running silent:',err);
     try{if(actx&&actx.close)actx.close();}catch(e2){}
     killAudio();
   }
   songTime=0;nextBar=0;nextNoteTime=actx?actx.currentTime+0.15:0;
-  lastRender=actx?actx.currentTime-RESUME:0;
+  lastRender=actx?nextNoteTime:0;
   lastRenderWall=performance.now()/1000-RESUME;
   currentSceneIdx=0;prevSceneIdx=-1;sceneFade=0;
   state='playing';ended=false;
@@ -541,11 +548,11 @@ function replay(){
   end.classList.add('hidden');end.classList.remove('show');
   if(actx){
     actx.resume();
-    master.gain.setValueAtTime(0,actx.currentTime);
-    master.gain.linearRampToValueAtTime(vol,actx.currentTime+1.5);
+    volGain.gain.setValueAtTime(0,actx.currentTime);
+    volGain.gain.linearRampToValueAtTime(vol,actx.currentTime+1.5);
   }
   songTime=0;nextBar=0;nextNoteTime=actx?actx.currentTime+0.15:0;
-  lastRender=actx?actx.currentTime-RESUME:0;
+  lastRender=actx?nextNoteTime:0;
   lastRenderWall=performance.now()/1000-RESUME;
   currentSceneIdx=0;prevSceneIdx=-1;sceneFade=0;
   state='playing';ended=false;
@@ -919,7 +926,9 @@ function buildPolaroids(){
 function miniScene(ctx,x,y,w,h,sc,t){
   ctx.save();ctx.beginPath();ctx.rect(x,y,w,h);ctx.clip();
   const g=ctx.createLinearGradient(x,y,x,y+h);
-  if(sc==='ocean'){g.addColorStop(0,'#ffd9a8');g.addColorStop(0.5,'#ff9d8a');g.addColorStop(0.55,'#2a6a8a');g.addColorStop(1,'#123a5a');}
+ 
+
+if(sc==='ocean'){g.addColorStop(0,'#ffd9a8');g.addColorStop(0.5,'#ff9d8a');g.addColorStop(0.55,'#2a6a8a');g.addColorStop(1,'#123a5a');}
   else if(sc==='stars'){g.addColorStop(0,'#0a0a2a');g.addColorStop(1,'#2a1a4d');}
   else if(sc==='cherry'){g.addColorStop(0,'#b9a5e0');g.addColorStop(0.5,'#e2aecf');g.addColorStop(1,'#ffd0a8');}
   else{g.addColorStop(0,'#1a1140');g.addColorStop(1,'#3a2a5e');}
@@ -1169,7 +1178,7 @@ function loop(now){
     // rain audio level
     if(rainGain&&actx){
       const inBreak=songTime>=32*BAR&&songTime<40*BAR;
-      const target=inBreak?0.14:0;
+      const target=inBreak?0.05:0;
       rainGain.gain.setTargetAtTime(target,actx.currentTime,0.6);
     }
     // pad filter brighter in chorus
@@ -1273,7 +1282,7 @@ document.getElementById('startBtn').addEventListener('click',start);
 document.getElementById('replayBtn').addEventListener('click',replay);
 playBtn.addEventListener('click',togglePlay);
 document.getElementById('fsBtn').addEventListener('click',toggleFS);
-volEl.addEventListener('input',()=>{vol=volEl.value/100;if(master&&actx)master.gain.setTargetAtTime(vol,actx.currentTime,0.05);});
+volEl.addEventListener('input',()=>{vol=volEl.value/100;if(volGain&&actx)volGain.gain.setTargetAtTime(vol,actx.currentTime,0.05);});
 
 function toggleFS(){
   if(!document.fullscreenElement){document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen();}
@@ -1290,9 +1299,7 @@ window.addEventListener('keydown',e=>{
 let dragging=false;
 function seekFromEvent(e){
   const r=track.getBoundingClientRect();
-  const x=(e.touches?e.touches[0].clientX:e.clientX
-
-)-r.left;
+  const x=(e.touches?e.touches[0].clientX:e.clientX)-r.left;
   const pct=clamp(x/r.width,0,1);
   const t=pct*TOTAL;
   songTime=t;nextBar=Math.floor(t/BAR);nextNoteTime=actx?actx.currentTime+0.05:0;
@@ -1300,7 +1307,7 @@ function seekFromEvent(e){
   const targetScene=SCENE_BY_NAME[SECTIONS[sectionAt(t)].scene];
   if(targetScene!==currentSceneIdx){prevSceneIdx=currentSceneIdx;currentSceneIdx=targetScene;sceneFade=0.3;}
   if(state==='playing'){
-    lastRender=actx?actx.currentTime-(t-RESUME):0;
+    lastRender=actx?nextNoteTime-nextBar*BAR:0;
     lastRenderWall=performance.now()/1000-(t-RESUME);
   }
 }
